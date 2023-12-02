@@ -75,7 +75,7 @@ class Lambda:
             #check if statement is assignment
             if statement.elem_type == '=':
                 var_name = statement.get('name')
-                if var_name not in self.inter_instance.variable_name_to_value and '.' not in var_name:
+                if var_name not in self.inter_instance.variable_name_to_value and '.' not in var_name and var_name != 'this':
                     local_vars.add(var_name)
                 self.inter_instance.run_statement(statement)
             else:
@@ -84,7 +84,7 @@ class Lambda:
                     #update closure var list so that if lambda is called again the updated values stay
                     self.update_closure_vars()
                     #clean scope because returning from function
-                    self.inter_instance.clean_scope(local_vars)
+                    self.inter_instance.clean_scope(self.inter_instance.variable_name_to_value, local_vars)
                     self.inter_instance.is_returning = False #set to false because we stop
                         #returning once we return out of a function
                     return self.inter_instance.return_value
@@ -116,35 +116,38 @@ class Object(InterpreterBase):
             self.fields = fields
         self.parent = parent
         self.inter_instance = interpreter_instance
+        #print("init " + str(self))
 
     def get_field(self, field_name):
+        #print(str(self))
         #if getting proto
         if field_name == 'proto':
             #if no proto, throw error
             if self.parent == None:
-                super().error(ErrorType.NAME_ERROR,
-                        f"Field {field_name} not found")
+                self.inter_instance.throw_unknown_field_error(field_name)
             return self.parent
         #if field doesn't exist, throw error
         curr_obj = self
         while field_name not in curr_obj.fields:
             curr_obj = curr_obj.parent
             if curr_obj == None:
-                super().error(ErrorType.NAME_ERROR,
-                        f"Field {field_name} not found")
+                self.inter_instance.throw_unknown_field_error(field_name)
             
         return curr_obj.fields[field_name][-1]
     
     def assign_field(self, field_name, value):
+        #print(str(self))
         #if assigning prototype
         if field_name == 'proto':
             #throw error if value is not of type object
-            if not isinstance(value, Object):
-                super().error(ErrorType.TYPE_ERROR,
-                    f"Assigning invalid type as prototype")
+            if not isinstance(value, Object) and value != None:
+                self.inter_instance.throw_invalid_prototype_error()
             self.parent = value
         else:
             self.inter_instance.do_assignment(self.fields, field_name, value)
+
+    def __str__(self):
+        return "fields " + str(self.fields) + " parent " + str(self.parent)
         
             
         
@@ -161,6 +164,7 @@ class Interpreter(InterpreterBase):
         self.is_returning = False #return flag set to true if current returning out of blocks
         self.return_value = None #return value
         self.child_object = [] #current object scope if we're in a method
+        self.inside_method = False #set to true when a method is called
 
         main_func = self.evaluate_func_definitions(ast)
 
@@ -176,12 +180,20 @@ class Interpreter(InterpreterBase):
             )
 
     def throw_unknown_lambda_error(self, num_args):
-        super().error(ErrorType.TYPE_ERROR,
+        super().error(ErrorType.NAME_ERROR,
                 f"Unknown lambda with with arg length {num_args}")
         
     def throw_unknown_input_error(self, arg_name):
         super().error(ErrorType.NAME_ERROR,
                         f"Variable {arg_name} has not been defined",)
+        
+    def throw_unknown_field_error(self, field_name):
+        super().error(ErrorType.NAME_ERROR,
+                        f"Field {field_name} not found")
+        
+    def throw_invalid_prototype_error(self):
+        super().error(ErrorType.TYPE_ERROR,
+                    f"Assigning invalid type as prototype")
         
     #returns var_name if var isn't a reference, otherwise returns
     #referenced variable and idx of its stack that contains referenced value
@@ -209,7 +221,7 @@ class Interpreter(InterpreterBase):
 
     #run statement nodes (either assignment, function call, if, while, or return)
     def run_statement(self, statement_node):
-        #print(self.variable_name_to_value)
+        #print(str(self.variable_name_to_value))
         if statement_node.elem_type == '=':
             target_var_name, resulting_value = self.evaluate_assignment_node(statement_node)
             self.do_assignment(self.variable_name_to_value, target_var_name, resulting_value)
@@ -242,7 +254,15 @@ class Interpreter(InterpreterBase):
             object = self.get_object(object_name)
                 
             object.assign_field(field_name, resulting_value)
-            
+        #if variable is 'this'
+        elif target_var_name == "this":
+            ref_var, idx = self.get_referenced_variable(scope_var_list, self.child_object[-1][0])
+            #throw error if resulting value is not an object
+            # if not isinstance(resulting_value, Object) and resulting_value != None:
+            #     super().error(ErrorType.TYPE_ERROR,
+            #             f"Cannot assign non-object to 'this'")
+            self.child_object[-1] = (self.child_object[-1][0], resulting_value)
+            scope_var_list[ref_var][idx] = resulting_value
         #if variable hasn't been created before or has gone out of scope
         elif (target_var_name not in scope_var_list or 
                 len(scope_var_list[target_var_name]) == 0):
@@ -277,7 +297,7 @@ class Interpreter(InterpreterBase):
                 if statement.elem_type == '=':
                     var_name = statement.get('name')
                     #if variable hasn't been created in scope yet, add to local_vars and variable is not a field
-                    if var_name not in scope_var_list and '.' not in var_name:
+                    if var_name not in scope_var_list and '.' not in var_name and var_name != 'this':
                         local_vars.add(var_name)
                     self.run_statement(statement)
                 else:
@@ -293,7 +313,7 @@ class Interpreter(InterpreterBase):
                 #check if statement is assignment
                 if statement.elem_type == '=':
                     var_name = statement.get('name')
-                    if var_name not in scope_var_list and '.' not in var_name:
+                    if var_name not in scope_var_list and '.' not in var_name and var_name != 'this':
                         local_vars.add(var_name)
                     self.run_statement(statement)
                 else:
@@ -319,7 +339,7 @@ class Interpreter(InterpreterBase):
                 #check if statement is assignment
                 if statement.elem_type == '=':
                     var_name = statement.get('name')
-                    if var_name not in scope_var_list and '.' not in var_name:
+                    if var_name not in scope_var_list and '.' not in var_name and var_name != 'this':
                         local_vars.add(var_name)
                     self.run_statement(statement)
                 else:
@@ -550,18 +570,18 @@ class Interpreter(InterpreterBase):
                     ErrorType.NAME_ERROR,
                     "Object 'this' not found",
                 )
-            return self.child_object[-1]
+            #child_name, child_obj = self.child_object[-1]
+
+            return self.child_object[-1][1]
         
         #if object has not been created, throw error
         if object_name not in self.variable_name_to_value:
-            print(self.child_object)
-            print(self.variable_name_to_value)
             super().error(ErrorType.NAME_ERROR,
                 f"Object {object_name} not found")
             
         ref_var, idx = self.get_referenced_variable(self.variable_name_to_value, object_name)
         #if object_name is not of type object
-        if type(self.variable_name_to_value[ref_var][idx]) is not Object:
+        if not isinstance(self.variable_name_to_value[ref_var][idx], Object):
             super().error(ErrorType.TYPE_ERROR,
                 f"{object_name} is not an object")
             
@@ -580,22 +600,23 @@ class Interpreter(InterpreterBase):
             super().error(ErrorType.TYPE_ERROR,
                     f"{method_name} is not a method")
             
-        self.child_object.append(object)
+        self.child_object.append((object_name, object))
 
         #if method refers to a function
         if isinstance(method, Function):
             #run function if number of inputs matches number of args
             if len(args) == method.num_args:
-                return self.run_function(self.variable_name_to_value, method, args)
+                ans = self.run_function(self.variable_name_to_value, method, args)
             else:
                 super().error(ErrorType.NAME_ERROR,
                 f"Unknown function {method_name} with arg length {len(args)}")
         #if method is a closure
         elif isinstance(method, Lambda):
                 #run lambda function
-                return method.run_lambda(args)
+                ans = method.run_lambda(args)
         
         self.child_object.pop()
+        return ans
 
     def do_func_call(self, scope_var_list, func_node):
         func_to_be_called = func_node.get('name')
@@ -684,7 +705,7 @@ class Interpreter(InterpreterBase):
             #check if statement is assignment
             if statement.elem_type == '=':
                 var_name = statement.get('name')
-                if var_name not in scope_var_list and '.' not in var_name:
+                if var_name not in scope_var_list and '.' not in var_name and var_name != 'this':
                     local_vars.add(var_name)
                 self.run_statement(statement)
             else:
@@ -754,7 +775,7 @@ class Interpreter(InterpreterBase):
 
 def main():
     interpreter = Interpreter()
-    program1 = """func foo(ref obj) {
+    program1 = """func foo(obj) {
     obj.y();
     obj.y();
 }
