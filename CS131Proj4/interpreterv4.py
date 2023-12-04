@@ -18,7 +18,8 @@ class Lambda:
         self.inter_instance = interpreter_instance #to access Interpreter methods and member variables
 
     #run lambda using input args
-    def run_lambda(self, input_args):
+    def run_lambda(self, input_args, interpreter_instance):
+        self.inter_instance = interpreter_instance
         local_vars = set() #variables that go out of scope once lambda ends
         self.arg_names = set() #stores names of the parameter variables
 
@@ -119,6 +120,7 @@ class Object(InterpreterBase):
         #print("init " + str(self))
 
     def get_field(self, field_name):
+
         #print(str(self))
         #if getting proto
         if field_name == 'proto':
@@ -135,7 +137,8 @@ class Object(InterpreterBase):
             
         return curr_obj.fields[field_name][-1]
     
-    def assign_field(self, field_name, value):
+    def assign_field(self, field_name, value, interpreter_instance):
+        self.inter_instance = interpreter_instance
         #print(str(self))
         #if assigning prototype
         if field_name == 'proto':
@@ -253,7 +256,7 @@ class Interpreter(InterpreterBase):
             
             object = self.get_object(object_name)
                 
-            object.assign_field(field_name, resulting_value)
+            object.assign_field(field_name, resulting_value, self)
         #if variable is 'this'
         elif target_var_name == "this":
             ref_var, idx = self.get_referenced_variable(scope_var_list, self.child_object[-1][0])
@@ -540,7 +543,14 @@ class Interpreter(InterpreterBase):
             object = self.get_object(object_name)
                 
             return object.get_field(field_name)
-        
+        #if variable is 'this'
+        elif var_name == "this":
+            ref_var, idx = self.get_referenced_variable(scope_var_list, self.child_object[-1][0])
+            #throw error if resulting value is not an object
+            # if not isinstance(resulting_value, Object) and resulting_value != None:
+            #     super().error(ErrorType.TYPE_ERROR,
+            #             f"Cannot assign non-object to 'this'")
+            return self.child_object[-1][1]
         #if variable exists in dictionary with a stack of at least size 1
         elif var_name in scope_var_list:
             ref_var, idx = self.get_referenced_variable(self.variable_name_to_value, var_name)
@@ -613,7 +623,7 @@ class Interpreter(InterpreterBase):
         #if method is a closure
         elif isinstance(method, Lambda):
                 #run lambda function
-                ans = method.run_lambda(args)
+                ans = method.run_lambda(args, self)
         
         self.child_object.pop()
         return ans
@@ -654,7 +664,7 @@ class Interpreter(InterpreterBase):
                     f"Unknown function {func_to_be_called} with arg length {len(args)}")
             elif isinstance(var_value, Lambda):
                     #run lambda function
-                    return var_value.run_lambda(args)
+                    return var_value.run_lambda(args,self)
         #unknown function
         super().error(ErrorType.NAME_ERROR,
                     f"Unknown function {func_to_be_called} with arg length {len(args)}")
@@ -777,15 +787,13 @@ def main():
     interpreter = Interpreter()
     program1 = """func foo(obj) {
     obj.y();
-    obj.y();
 }
 
 func main() {
     x = @;
-    z = 0;
-    x.y = lambda() {z = z + 1; print(z);};
-    foo(x);
-    x.y();
+    y = @;
+    x.function = lambda() {print(this == x);};
+    x.function();
 }
     """
     interpreter.run(program1)
